@@ -24,3 +24,8 @@ kubectl create secret docker-registry ghcr-creds \
   --docker-username=<YOUR_GITHUB_USERNAME> \
   --docker-password=<YOUR_PAT>
 ```
+
+To create an image locally without pushing to the repository, run 
+```
+minikube image build -t ghcr.io/quantlytic/dbwriteservice:latest -f deploy/dockerfile .
+```
