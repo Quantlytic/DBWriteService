@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-write-service
+spec:
+  template:
+    spec:
+      # An empty list overrides the base and removes the imagePullSecrets.
+      imagePullSecrets: []
+      containers:
+      # The container must be named to apply the patch.
+      - name: db-write-service
+        # 'Never' ensures that the image is never pulled from a remote repository.
+        imagePullPolicy: Never
