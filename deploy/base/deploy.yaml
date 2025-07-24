@@ -24,9 +24,11 @@ spec:
       labels:
         app: db-write-service
     spec:
+      imagePullSecrets:
+      - name: ghcr-creds
       containers:
       - name: db-write-service
-        image: ghcr.io/quantlytic/db-write-service:release
+        image: ghcr.io/quantlytic/dbwriteservice:latest
         ports:
         - containerPort: 8080
         resources:
