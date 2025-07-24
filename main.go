@@ -2,8 +2,16 @@ package main
 
 import (
 	"fmt"
+	"os"
+
+	"github.com/Quantlytic/DBWriteService/pkg/kafkaconsumer"
 )
 
 func main() {
-	fmt.Println("Hello, World!")
+	err := kafkaconsumer.RunConsumer()
+	if err != nil {
+		fmt.Printf("Error running consumer: %s\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Consumer finished successfully")
 }
