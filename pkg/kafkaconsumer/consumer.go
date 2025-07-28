@@ -3,70 +3,141 @@ package kafkaconsumer
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-const MIN_COMMIT_COUNT = 10
+const (
+	MIN_COMMIT_COUNT = 10
+	POLLING_RATE     = 50 // TODO: Optimize later
+)
 
-func CreateConsumer() (*kafka.Consumer, error) {
-	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": "10.99.97.145:9092",
-		"group.id":          "db-write-service-group",
-		"auto.offset.reset": "smallest"})
+// Called to process messages. Commit func signals the message is processed and ready to commit to kafka
+type OnMessage func(msg string, commit func())
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to create consumer: %s", err)
-	}
-
-	return consumer, nil
+type KafkaConsumerConfig struct {
+	BootstrapServers string
+	GroupID          string
+	AutoOffsetReset  string
 }
 
-func RunConsumer() error {
-	c, err := CreateConsumer()
+type KafkaConsumer struct {
+	consumer           *kafka.Consumer
+	cfg                KafkaConsumerConfig
+	topicCallbacks     map[string]OnMessage
+	partitionsToCommit []kafka.TopicPartition
+	commitMutex        sync.Mutex
+}
+
+type TopicConfig struct {
+	TopicName string
+	Callback  OnMessage
+}
+
+// createConsumer initializes a new Kafka consumer with the provided configuration
+func NewKafkaConsumer(cfg KafkaConsumerConfig) (*KafkaConsumer, error) {
+	// Create confluent kafka-go consumer
+	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers":  cfg.BootstrapServers,
+		"group.id":           cfg.GroupID,
+		"auto.offset.reset":  cfg.AutoOffsetReset,
+		"enable.auto.commit": false,
+	})
 	if err != nil {
-		fmt.Printf("Error initializing consumer: %s\n", err)
-		return err
+		return nil, err
 	}
 
-	defer c.Close()
+	return &KafkaConsumer{
+		consumer:       consumer,
+		cfg:            cfg,
+		topicCallbacks: make(map[string]OnMessage),
+	}, nil
+}
 
-	// Subscribe to the topic
-	fmt.Println("Subscribing to topic 'stock-data-raw'")
+func (c *KafkaConsumer) Close() {
+	if c.consumer != nil {
+		c.consumer.Close()
+	}
+}
 
-	if err := c.SubscribeTopics([]string{"stock-data-raw"}, nil); err != nil {
-		fmt.Printf("Failed to subscribe to topic: %s\n", err)
-		return fmt.Errorf("failed to subscribe to topic: %s", err)
+// Commit stores the offsets to be committed
+func (c *KafkaConsumer) Commit() error {
+	c.commitMutex.Lock()
+	defer c.commitMutex.Unlock()
+
+	if len(c.partitionsToCommit) == 0 {
+		return nil
 	}
 
-	fmt.Println("Subscribed to topic 'stock-data-raw'")
+	offsetsToCommit := make([]kafka.TopicPartition, len(c.partitionsToCommit))
+	copy(offsetsToCommit, c.partitionsToCommit)
+
+	// Reset the slice
+	c.partitionsToCommit = c.partitionsToCommit[:0]
+
+	for i := range offsetsToCommit {
+		offsetsToCommit[i].Offset++
+	}
+
+	_, err := c.consumer.CommitOffsets(offsetsToCommit)
+	if err != nil {
+		return fmt.Errorf("failed to commit offsets: %w", err)
+	}
+
+	return nil
+}
+
+// Given a slice of topic names + callbacks, subscribe to those topics with kafka
+func (c *KafkaConsumer) SubscribeTopics(topics []TopicConfig) error {
+	// Pre-Allocate slice of topic names
+	topicNames := make([]string, 0, len(topics))
+
+	// Store callbacks for each topic
+	for _, topic := range topics {
+		if topic.Callback == nil {
+			return fmt.Errorf("callback for topic %s is nil", topic.TopicName)
+		}
+
+		// Store mapping of topic name to callback
+		c.topicCallbacks[topic.TopicName] = topic.Callback
+
+		// Append topic name to the slice
+		topicNames = append(topicNames, topic.TopicName)
+	}
+
+	// Subscribe to topics in kafka
+	err := c.consumer.SubscribeTopics(topicNames, nil)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to topics: %w", err)
+	}
 
 	run := true
-	msg_count := 0
 
 	for run {
-		ev := c.Poll(100)
+		ev := c.consumer.Poll(POLLING_RATE)
 		switch e := ev.(type) {
 		case *kafka.Message:
-			msg_count += 1
-			if msg_count%MIN_COMMIT_COUNT == 0 {
-				// async commit every MIN_COMMIT_COUNT messages
-				go func() {
-					c.Commit()
-				}()
+			// Call the callback for the topic
+			if callback, ok := c.topicCallbacks[*e.TopicPartition.Topic]; ok {
+				commitFunc := func() {
+					c.commitMutex.Lock()
+					defer c.commitMutex.Unlock()
+					c.partitionsToCommit = append(c.partitionsToCommit, e.TopicPartition)
+				}
+				go callback(string(e.Value), commitFunc)
+			} else {
+				fmt.Printf("No callback found for topic %s\n", *e.TopicPartition.Topic)
 			}
-			fmt.Printf("%% Message on %s:\n%s\n",
-				e.TopicPartition, string(e.Value))
 
 		case kafka.PartitionEOF:
-			fmt.Printf("%% Reached %v\n", e)
+			fmt.Printf("Reached %v\n", e)
 		case kafka.Error:
-			fmt.Fprintf(os.Stderr, "%% Error: %v\n", e)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", e)
 			run = false
-			// default:
-			// 	fmt.Printf("Ignored %v\n", e)
 		}
 	}
 
+	fmt.Printf("Subscribed to topics: %v\n", topicNames)
 	return nil
 }
