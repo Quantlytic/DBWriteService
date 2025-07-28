@@ -12,3 +12,6 @@ spec:
       - name: db-write-service
         # 'Never' ensures that the image is never pulled from a remote repository.
         imagePullPolicy: Never
+        envFrom:
+        - secretRef:
+            name: db-write-service-secrets
