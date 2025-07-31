@@ -1,4 +1,10 @@
 # Project Progress / Notes
+**July 30th -** Decided that later services will need to read files from Minio, and named the minio writer `minioclient`. Implemented setting up a client, environment variable configuration, reading from kafka, and writing the message to an object in minio. 
+Some Project Goals for next steps:
+- Learn more about context in go and add context to kafka implementations
+- Replace console writes with a logging library. Research tools / dashboards like grafana 
+- Update kafka deployment in `Infra` repo to use overlays
+
 **July 28th -** After learning how to create a consumer for my kafka topic, I realized two potential problems that I would run into in this project:
 - If a consumer needed to subscribe to multiple topics, they would create multiple confluent kafka go consumers to connect to the same server
 - If I wanted to batch raw stock data before writing to a file / minio, I will need to manually control committing. 
