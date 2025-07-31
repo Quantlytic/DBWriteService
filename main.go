@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/Quantlytic/DBWriteService/internal/config"
 	"github.com/Quantlytic/DBWriteService/pkg/kafkaconsumer"
+
+	"github.com/Quantlytic/DBWriteService/pkg/minioclient"
 )
 
 func main() {
 	appConfig := config.Load()
 
+	// Create Kafka Consumer
 	cfg := kafkaconsumer.KafkaConsumerConfig{
 		BootstrapServers: appConfig.KafkaBrokers,
 		GroupID:          "db-write-service",
@@ -27,6 +31,13 @@ func main() {
 
 	fmt.Println("Kafka consumer created successfully")
 
+	// Create minio writer
+	minioClient, err := minioclient.NewMinioClient(appConfig.MinioEndpoint, appConfig.MinioAccessKey, appConfig.MinioSecretKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create Minio client: %v\n", err)
+		os.Exit(1)
+	}
+
 	var (
 		msgCount int
 		mutex    sync.Mutex
@@ -34,7 +45,17 @@ func main() {
 
 	messageProcessor := func(msg string, commit func()) {
 		fmt.Printf("Received message: %s\n", msg)
-		commit() // Stage this message for commit
+
+		// Write message to Minio
+		err := minioClient.WriteBytesToFile(context.Background(), "raw-stock-data", fmt.Sprintf("test/%d", msgCount), []byte(msg))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write to Minio: %v\n",
+				err)
+			return
+		}
+
+		// Stage this message for commit
+		commit()
 
 		mutex.Lock()
 		defer mutex.Unlock()

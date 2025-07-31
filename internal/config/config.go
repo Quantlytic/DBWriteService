@@ -9,8 +9,11 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	KafkaBrokers string
-	KafkaTopic   string
+	KafkaBrokers   string
+	KafkaTopic     string
+	MinioEndpoint  string
+	MinioAccessKey string
+	MinioSecretKey string
 }
 
 // Load loads the configuration from environment variables
@@ -22,8 +25,11 @@ func Load() *Config {
 	}
 
 	return &Config{
-		KafkaBrokers: getEnv("KAFKA_BROKERS", "localhost:9092"),
-		KafkaTopic:   getEnv("KAFKA_TOPIC", "stock-data-raw"),
+		KafkaBrokers:   getEnv("KAFKA_BROKERS", "localhost:9092"),
+		KafkaTopic:     getEnv("KAFKA_TOPIC", "stock-data-raw"),
+		MinioEndpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
+		MinioAccessKey: getEnv("MINIO_ACCESS_KEY", "username"),
+		MinioSecretKey: getEnv("MINIO_SECRET_KEY", "password"),
 	}
 }
 
