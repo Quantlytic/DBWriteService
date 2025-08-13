@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
-	"sync"
+	"time"
 
 	"github.com/Quantlytic/DBWriteService/internal/config"
 	"github.com/Quantlytic/DBWriteService/pkg/kafkaconsumer"
 
 	"github.com/Quantlytic/DBWriteService/pkg/minioclient"
+	"github.com/Quantlytic/DBWriteService/pkg/models"
 )
 
 func main() {
@@ -18,7 +21,7 @@ func main() {
 	// Create Kafka Consumer
 	cfg := kafkaconsumer.KafkaConsumerConfig{
 		BootstrapServers: appConfig.KafkaBrokers,
-		GroupID:          "db-write-service",
+		GroupID:          "minio-write-service",
 		AutoOffsetReset:  "earliest",
 	}
 
@@ -38,45 +41,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	var (
-		msgCount int
-		mutex    sync.Mutex
-	)
+	onMessage := func(bucketName string) kafkaconsumer.OnMessage {
+		return func(msg string, commit func()) {
+			fmt.Printf("Received message: %s\n", msg)
 
-	messageProcessor := func(msg string, commit func()) {
-		fmt.Printf("Received message: %s\n", msg)
-
-		// Write message to Minio
-		err := minioClient.WriteBytesToFile(context.Background(), "raw-stock-data", fmt.Sprintf("test/%d", msgCount), []byte(msg))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write to Minio: %v\n",
-				err)
-			return
-		}
-
-		// Stage this message for commit
-		commit()
-
-		mutex.Lock()
-		defer mutex.Unlock()
-		msgCount++
-
-		if msgCount >= 3 {
-			fmt.Println("Processed 3 messages, committing now...")
-			err := consumer.Commit()
+			var apiData models.ApiData
+			err := json.Unmarshal([]byte(msg), &apiData)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to commit: %v\n", err)
-			} else {
-				fmt.Println("Commit successful.")
+				fmt.Fprintf(os.Stderr, "Failed to unmarshal message: %v\n", err)
+				return
 			}
-			msgCount = 0 // Reset counter
+
+			objName := fmt.Sprintf("%s/%s/%s", time.Now().Format("2006-01-02"), apiData.Exchange, apiData.Symbol)
+			exists, err := minioClient.ObjectExists(context.Background(), bucketName, objName)
+
+			if err != nil {
+				log.Fatalf("Failed to check if object exists: %v\n", err)
+				return
+			}
+
+			if !exists {
+				minioClient.WriteBytesToFile(context.Background(), bucketName, objName, []byte(apiData.Data))
+			} else {
+				minioClient.AppendBytesToFile(context.Background(), bucketName, objName, []byte(apiData.Data))
+			}
 		}
 	}
 
 	topics := []kafkaconsumer.TopicConfig{
 		{
-			TopicName: appConfig.KafkaTopic,
-			Callback:  messageProcessor,
+			TopicName: "stock-quotes",
+			Callback:  onMessage("stock-quotes"),
+		},
+		{
+			TopicName: "stock-trades",
+			Callback:  onMessage("stock-trades"),
 		},
 	}
 
