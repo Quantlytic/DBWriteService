@@ -1,16 +1,12 @@
-# DBWriteService
-Write service will subscribe to raw data kafka topic and write data to the database for long term storage
+# BucketWriteService
+Write service will subscribe to raw data kafka topic and write data to a minio bucket for long term storage
 
 ## Tasks
 ### Project Task List
 - [ ] Create github action to deploy to kubernetes cluster
     - [x] Action - Build Image & Store in registry
     - [ ] Action - Deploy new release to prod
-- [x] Create Go package for reading data from kafka topic
-    - [x] Basic functionality for subscribing and reading from topic
-    - [x] Add callback function to apply to each message
-    - [x] Allow configuration of topic, kafka ip, group, etc
-- [x] Create Go package for writing to Minio Bucket
+- [ ] Create parquet file in memory to push to minio bucket
 
 ### Progress
 I'm keeping notes on progress and design decisions in the [docs directory](/docs/progress-log.md).
